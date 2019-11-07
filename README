@@ -1,19 +1,21 @@
 This project provides a simple (not production ready) method for providing a Bundle Server for Open Policy Agent : see: https://www.openpolicyagent.org/docs/v0.12.2/bundles/
 
-I created the sample bundle from the one provided by the abive link but simply changed alice & bob to steve & anand to prove it was working
+I created the sample bundle from the one provided by the above link but simply changed alice & bob to steve & anand to prove it was working
 
 The trivial Golang server is built as usual (docker build .) and the resultant image should be tagged as follows:
 docker tag <container built> stevef1uk/opa-opa-istio-plugin
 
-I have built this from the opa-istio-plugin (see: https://github.com/open-policy-agent/opa-istio-plugin) with extra trace in the opa bundle downloader.
-Note: needed to add to the end of the go.mod file the correct instruction to enable this e.g.
-replace github.com/open-policy-agent/opa => /Users/stevef/Source_Code/go/src/github.com/opa
+    As an aside, whilst I was trying to get this to work I built my own opa-istio-plugin container and used mine as the image
+    in the quick-start.yaml. I built this from the opa-istio-plugin (see: https://github.com/open-policy-agent/opa-istio-plugin)
+    with extra trace in the opa bundle downloader in the main opa project (see:https://github.com/open-policy-agent/opa).
+    Note: I needed to add to the end of the go.mod file the correct instruction to enable this e.g.
+    replace github.com/open-policy-agent/opa => /Users/stevef/Source_Code/go/src/github.com/opa
 
-Building the opa-istio plugin uses the command:
-  make clean build-linux image-quick
+    Building the opa-istio plugin uses the command:
+      make clean build-linux image-quick
 
 The deploy.yaml file deploys the simple server with the OPA Bundle file embedded within it to Kubernetes
-The bundle file needs to be built in two stages:
+The bundle file needs to be built in two stages (assuming policy data in the directory structure below istio)
 1. tar cvf bundle.tar istio
 2. gzip bundle.tar
 
