@@ -45,7 +45,10 @@ data:
             enable-reflection: false
 ---
 
-Now, the hard coded IP needs to be replaced by a service name when I figure that out. The service entry file required is as follows:
+Now, the hard coded IP needs to be replaced by a service name when I figure that out.
+The IP address needs to be the cluster IP address of the bundle server Pod
+
+The service entry file required is as follows:
 
 apiVersion: networking.istio.io/v1alpha3
 kind: ServiceEntry
