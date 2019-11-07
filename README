@@ -1,0 +1,154 @@
+This project provides a simple (not production ready) method for providing a Bundle Server for Open Policy Agent : see: https://www.openpolicyagent.org/docs/v0.12.2/bundles/
+
+I created the sample bundle from the one provided by the abive link but simply changed alice & bob to steve & anand to prove it was working
+
+The trivial Golang server is built as usual (docker build .) and the resultant image should be tagged as follows:
+docker tag <container built> stevef1uk/opa-opa-istio-plugin
+
+I have built this from the opa-istio-plugin (see: https://github.com/open-policy-agent/opa-istio-plugin) with extra trace in the opa bundle downloader.
+Note: needed to add to the end of the go.mod file the correct instruction to enable this e.g.
+replace github.com/open-policy-agent/opa => /Users/stevef/Source_Code/go/src/github.com/opa
+
+Building the opa-istio plugin uses the command:
+  make clean build-linux image-quick
+
+The deploy.yaml file deploys the simple server with the OPA Bundle file embedded within it to Kubernetes
+The bundle file needs to be built in two stages:
+1. tar cvf bundle.tar istio
+2. gzip bundle.tar
+
+The configuration file from the opa-istio-example (see: https://github.com/open-policy-agent/opa-istio-plugin) was modified as documented locally.
+The configuration part of my file was as follows:
+
+############################################################
+# Example configuration to bootstrap OPA-Istio sidecars.
+############################################################
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opa-istio-config
+data:
+  config.yaml: |
+    services:
+      - name: controller
+        url: http://10.128.0.221:8080
+    bundles:
+      istio/authz:
+        service: controller
+    plugins:
+        envoy_ext_authz_grpc:
+            addr: :9191
+            query: data.istio.authz.allow
+            dry-run: false
+            enable-reflection: false
+---
+
+Now, the hard coded IP needs to be replaced by a service name when I figure that out. The service entry file required is as follows:
+
+apiVersion: networking.istio.io/v1alpha3
+kind: ServiceEntry
+metadata:
+  name: opa-bundle
+spec:
+  hosts:
+   - opa-bundle-server
+  ports:
+  - number: 8080
+    name: http
+    protocol: HTTP
+  resolution: DNS
+  location: MESH_EXTERNAL
+---
+
+I have successfully run this on minikube with the deploy.yaml being deployed to a separate namespace.
+I needed to create a service entry for my service:
+kubectl expose pod  opa-bundle-server -n test --type=LoadBalancer --port=8080
+
+Deploying the bundle server in the same namespace as the sample bookinfo application did not work.
+
+I have also run this on OpenShift, but there are more steps to follows.
+
+Steps for how to get OPA to work with crc (OpenShift) and RedHat Service Mesh
+
+crc version:
+version: 1.0.0-rc.0+34371d3
+OpenShift version: 4.2.0-0.nightly-2019-09-26-192831 (embedded in binary)
+
+Service Mesh Install Steps:
+
+crc start
+crc console —url
+Install RedHat Elastic Operator from Console logged in as kubeadmin using Operators -> OperatorHub & enable subscription
+in a terminal login using kubeadmin
+oc new-project istio-system
+oc new-project myproject
+Install RedHat Jaeger Operator & enable subscription
+Install RedHat Kiali Operator & enable subscription
+Wait for all operators to have a status of InstallSucceeded using Operators -> Installed Operators
+Install RedHat OpenShift Service Mesh & enable subscription
+Wait until the Service Mesh operators has installed
+Switch to project istio-system and return to Installed Operators pane
+Select the RedHat Service Mesh Operator API: ’Istio Service Mesh Control Plane’ and then ‘Create Service Mesh Control Plane’
+Pods (12) are then created - wait for them to all be in running state & there should be 5 routes created - make a note of the istio-ingressgateway URL for later
+Select the RedHat Service Mesh Operator API: ‘Istio Service Mesh Member Role’ and then ‘Create Service Mesh Member Rolls’. Edit the YAML to add myproject (or the project you want to use) within members & Create
+Still in project istio-system edit the config map: istio and find disablePolicyChecks and change true to false and save
+OPA Install Steps following: https://github.com/open-policy-agent/opa-istio-plugin :
+1. kubectl apply -f https://raw.githubusercontent.com/open-policy-agent/opa-istio-plugin/master/quick_start.yaml
+2. Using terminal give opa-istio project required permissions:
+oc adm policy add-scc-to-user anyuid -z default -n opa-istio
+oc adm policy add-scc-to-user privileged -z default -n opa-istio
+3. From terminal or console delete the admission-controller pod in project opa-istio so that a new container is created and will run successfully
+4. Using terminal switch to my project (oc project myproject) & give same permissions as above:
+oc adm policy add-scc-to-user anyuid -z default -n myproject
+oc adm policy add-scc-to-user privileged -z default -n myproject
+oc adm policy add-scc-to-user anyuid -z bookinfo-reviews -n myproject
+oc adm policy add-scc-to-user anyuid -z bookinfo-productpage -n myproject
+oc adm policy add-scc-to-user privileged -z bookinfo-productpage -n myproject
+oc adm policy add-scc-to-user privileged -z bookinfo-reviews -n myproject
+5. Enable istio & op automatic injection into myproject: Note: need to use kubectl and namespace rather than oc and project
+kubectl label namespace myproject opa-istio-injection="enabled"
+kubectl label namespace myproject istio-injection="enabled"
+6. oc apply -f https://raw.githubusercontent.com/Maistra/bookinfo/maistra-1.1/bookinfo.yaml
+7. In myproject to ensure ope-config config maps are present:
+kubectl apply -f https://raw.githubusercontent.com/open-policy-agent/opa-istio-plugin/master/quick_start.yaml
+8. Wait until all Pods are running and you should see 3/3 for containers in each pod. This takes rather too long for my liking!
+9. oc apply -f https://raw.githubusercontent.com/Maistra/bookinfo/maistra-1.1/bookinfo-gateway.yaml
+10. Test end points as tutorial shows using ingress-gateway URL found above e.g.
+curl --user alice:password -i http://istio-ingressgateway-istio-system.apps-crc.testing/productpage
+
+
+I deployed my server in a separate project, test. In the test project I needed to:
+
+1. Expose the service:
+oc expose pod  opa-bundle-server -n test --type=LoadBalancer --port=8080
+
+2. Enable a network Policy to enable the opa-istio sidecar to connect to it:
+
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: web-allow-external
+  namespace: test
+  selfLink: >-
+    /apis/networking.k8s.io/v1/namespaces/test/networkpolicies/web-allow-external
+  uid: 51871760-009a-11ea-a67e-5eb86bedde0f
+  resourceVersion: '273789'
+  generation: 1
+  creationTimestamp: '2019-11-06T13:35:38Z'
+spec:
+  podSelector:
+    matchLabels:
+      app: opa-bundle-server
+  ingress:
+    - {}
+  policyTypes:
+    - Ingress
+---
+
+On OpenShift I created routes for the two pages linked to the product page service using the paths:
+/productpage
+/api/v1/products
+
+This testing with:
+curl --user anand:password -i http://productpage-myproject.apps-crc.testing/productpage
+curl --user steve:password -i http://products-myproject.apps-crc.testing/api/v1/products

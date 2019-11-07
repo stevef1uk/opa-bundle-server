@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: opa-bundle-server
+  labels:
+    app: opa-bundle-server
+spec:
+  containers:
+    - name: opa-bundle-server
+      image: stevef1uk/opa-bundle-server
+      ports:
+        - containerPort: 8080
